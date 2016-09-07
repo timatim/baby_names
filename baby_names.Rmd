@@ -1,0 +1,289 @@
+---
+title: "Capital One Data Science Challenge Part 2: Baby Names"
+author: "Jui-Ting Hsu"
+date: "August 13, 2016"
+output: 
+  html_document:
+    theme: lumen
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+#Part A. Descriptive Analysis
+```{r, warning=FALSE, message=FALSE}
+#install.packages("dplyr", "knitr", "plotly")
+library(dplyr)
+library(knitr)
+library(plotly)
+```
+
+## Reading Data
+```{r, eval=FALSE}
+# get all the filenames of the txt files
+filenames = list.files(pattern = "*.TXT")
+
+states = filenames
+for (i in 1:length(states)) {
+  assign(states[i], read.csv(filenames[i], header = FALSE))
+}
+
+babynames = read.csv(filenames[1], header = FALSE)
+for (i in 2:length(filenames)) {
+  babynames = merge(babynames, read.csv(filenames[i], header = FALSE), all = TRUE)
+}
+
+colnames(babynames) = c("state", "sex", "year", "name", "count")
+# save table as a file for future ease
+save(babynames, file = "babynames.Rda")
+```
+The baby names data are stored in 51 individual text files, with each containing the baby names of a single state of the US. In each of these files, data is stored in the format of 2-digit state code, sex (M/F), 4-digit year of birth, name, and number of occurences. Each column is separated by a comma. 
+\
+\
+While it seems organized to store data in different files according to the state, this actually makes it hard to process the data for analysis. For example, all 51 files have to be used if one wishes to count the occurences of a certain name in all of the US. To ease the process of analysis, I read all the data into one data frame. 
+\
+\
+After changing the column names to make them readable, I saved the data frame object as a file so I could just load it back (as below) if I want to use it again in the future. This saves the trouble and time of reading the data into R again.  
+
+```{r cache=TRUE}
+load("babynames.Rda")
+```
+
+## Most Popular Name
+To investigate the most popular name of all time, regardless of state, year, and gender, I simply grouped the table by `name`. After that, I reorganized the table into 'top_names', which has two columns: group name, sum of count of all the elements in the group. In this case, group name corresponds to the name, and the sum of count of all the elements is simply sum of all the occurences of the name in the record. 
+```{r, cache=TRUE}
+# most popular name
+by_name = babynames %>% group_by(name)
+top_names = arrange(summarise(by_name, count = sum(count)), desc(count))
+
+top_names_10 = head(top_names, 10)
+```
+`r kable(top_names_10, align = 'l')`
+
+```{r cache=FALSE}
+top_names_100 = head(top_names, 100)
+plot_ly(x = top_names_100$name,
+        y = top_names_100$count,
+        orientation = "v",
+        type = "bar") %>%
+  layout(xaxis = list(title = "Name"), yaxis = list(title = "Occurences"), title = "Histogram of Top 100 Names", margin = list(b = 100))
+```
+
+James and John came out as first and second, unsurprisingly. One interesting fact to notice is that of the top 10 most popular names, only "Mary" was a female name. This might be due to the fact that there are more female names out there that people commonly use than there are male names, so female names were more evenly distributed.  
+   
+
+## Most Ambiguous Name
+In order to discuss ambiguity of a name, there needs to be a definition for ambiguity in the data sense. Ambiguous names are names from which one cannot easily tell the gender of. Therefore, there would be a close amount of occurences of that name in both male and female. In my analysis, I ranked the names in the order of the difference between the percentages of occurence between male and female. I neglected names that have less than 200 counts in total since those might be considered as extreme cases. The smaller the percentage difference, the more ambiguous the name is.  
+```{r cache=TRUE}
+# gender ambiguous name
+ambig_name = function(qyear) {
+  by_sex_name = babynames %>%
+    filter(year == qyear) %>%
+    group_by(sex, name) %>%
+    summarise(count = sum(count))
+  
+  ambiguous = merge(by_sex_name[by_sex_name$sex == 'F',], by_sex_name[by_sex_name$sex == 'M',], by = "name")
+  ambiguous$sex.x = NULL
+  ambiguous$sex.y = NULL
+  colnames(ambiguous) = c("name", "F_count", "M_count")
+  # calculate percentages
+  ambiguous$total_count = ambiguous$F_count + ambiguous$M_count
+  ambiguous$M_percent = ambiguous$M_count/ambiguous$total_count
+  ambiguous$F_percent = ambiguous$F_count/ambiguous$total_count
+  ambiguous$percent_diff = abs(ambiguous$M_percent - ambiguous$F_percent)
+  # sort on percentage difference, neglect names with too little total count
+  ambiguous %>% 
+    arrange(percent_diff) %>%
+    filter(total_count >= 200)
+}
+ambig_name_2013 = head(ambig_name(2013), 10)
+ambig_name_1945 = head(ambig_name(1945), 10)
+```
+
+
+###2013
+`r kable(ambig_name_2013, align = 'l')`
+
+```{r cache=FALSE}
+ambig_names_2013_50 = head(ambig_name(2013), 50)
+plot_ly(x = ambig_names_2013_50$name,
+        y = ambig_names_2013_50$F_count,
+        name = "Female",
+        orientation = "v",
+        type = "bar") %>%
+  add_trace(x = ambig_names_2013_50$name,
+        y = ambig_names_2013_50$F_count,
+        name = "Male",
+        orientation = "v",
+        type = "bar") %>%
+  layout(xaxis = list(title = "Name"), yaxis = list(title = "Occurences"), title = "Barplot of Top 50 Ambiguous Names in 2013", margin = list(b = 100)) 
+```
+
+Jael was the most ambiguous name in 2013, with only 2.3% difference between male and female. Charlie is the most popular name out of the top 10 ambiguous names in 2013.  
+
+###1945  
+`r kable(ambig_name_1945, align = 'l')`
+
+```{r cache=FALSE}
+ambig_names_1945_50 = head(ambig_name(1945), 50)
+plot_ly(x = ambig_names_1945_50$name,
+        y = ambig_names_1945_50$F_count,
+        name = "Female", 
+        orientation = "v",
+        type = "bar") %>%
+  add_trace(x = ambig_names_1945_50$name,
+        y = ambig_names_1945_50$M_count,
+        name = "Male",
+        orientation = "v",
+        type = "bar") %>%
+  layout(xaxis = list(title = "Name"), yaxis = list(title = "Occurences"), title = "Barplot of Top 50 Ambiguous Names in 1945", margin = list(b = 100)) 
+```
+
+Frankie was the most ambiguous name back in 1945, with 6.5% difference between male and female. An interesting fact to note is that of the top 10 most ambiguous names of 1945, there are 5 that ended in 'ie'. Better take that into account when emailing someone named Leslie! 
+\
+\
+Another observation is that the "ambiguity" of the ambiguous names were smaller in 1945 than that of 2013. Names are more ambiguous today than they were back in 1945. 
+
+## Increase in Popularity
+To assess the increase in popularity, I compared both the increase in percentage (out of all other names of that year) and the absolute increase in count. The reason I took into account the percentage increase is because the population might be vastly different, so the absolute increase in count might not be a trustworthy metric for popularity. 
+```{r cache=TRUE}
+# popularity 1980
+babynames_1980 = by_name %>%
+  filter(year == 1980) %>%
+  summarise(count = sum(count)) %>%
+  arrange(desc(count))
+total_1980 = sum(babynames_1980$count)
+babynames_1980$percentage = babynames_1980$count / total_1980
+
+# popularity 2015
+babynames_2015 = by_name %>%
+  filter(year == 2015) %>%
+  summarise(count = sum(count)) %>%
+  arrange(desc(count))
+total_2015 = sum(babynames_2015$count)
+babynames_2015$percentage = babynames_2015$count / total_2015
+
+# combine 1980 2015
+babynames_1980_2015 = merge(babynames_1980, babynames_2015, by = "name")
+colnames(babynames_1980_2015) = c("name", "count_1980", "percent_1980", "count_2015", "percent_2015")
+
+# generate new statistics base on the two
+babynames_1980_2015$count_diff = babynames_1980_2015$count_2015 - babynames_1980_2015$count_1980
+babynames_1980_2015$percent_diff = babynames_1980_2015$percent_2015 - babynames_1980_2015$percent_1980
+babynames_1980_2015$percent_growth = babynames_1980_2015$count_2015/babynames_1980_2015$count_1980
+
+popularity_inc = head(arrange(babynames_1980_2015, desc(percent_diff)), 10)
+```
+`r kable(popularity_inc, align = 'l')`
+
+```{r cache=FALSE}
+plot_ly(x = popularity_inc$name,
+        y = popularity_inc$count_1980,
+        name = "1980", 
+        orientation = "v",
+        type = "bar") %>%
+  add_trace(x = popularity_inc$name,
+        y = popularity_inc$count_2015,
+        name = "2015",
+        orientation = "v",
+        type = "bar") %>%
+  layout(xaxis = list(title = "Name"), yaxis = list(title = "Occurences"), title = "Comparison Barplot of Top 10 Popularity Gain Names Since 1980", margin = list(b = 100)) 
+```
+
+From the table above, "Emma" seems to have the most increase in popularity since 1980. It has a 0.64% increase in percentage and a whopping increase of 19874 counts from just 481 counts in 1980. "Isabella"'s occurences had the largest percentage growth, with 674 times more occurences in 2015 than in 1980.   
+
+# Part B. Other Insights
+
+## Name Diversity
+### Between both Sex
+In the Most Popular Name section, I speculated that "Mary" was the only top 10 female name because female names were more diversed than male name. Let's assess the name diversity of both genders. 
+```{r cache=TRUE}
+# group by sex
+name_diversity = babynames %>%
+  group_by(sex, name) %>%
+  summarise(count = sum(count)) %>%
+  summarise(count = n())
+```
+```{r}
+# plot pie chart
+plot_ly(labels = c("Female", "Male"),
+        values = name_diversity$count,
+        orientation = 'v',
+        type = 'pie',
+        title = "Pie Chart of Unique Male and Female Names")
+```
+As speculated, there are 20279 unique female names and 13334 unique male names. Out of all 33613 unique names, 60.3% were female and 39.7% were male.
+
+### Diversity through Time
+Has it always been this way? Let's look at the diversity of names through time.
+```{r cache=TRUE}
+# first sum then count to avoid state duplicates
+name_diversity_time = babynames %>%
+  group_by(sex, year, name) %>%
+  summarise(count = sum(count)) %>%
+  summarise(count = n())
+```
+```{r}
+# plot scatter plot
+plot_ly(x = name_diversity_time$year,
+        y = filter(name_diversity_time, sex == 'F')$count,
+        name = "Female",
+        type = 'scatter') %>%
+  add_trace(x = name_diversity_time$year,
+            y = filter(name_diversity_time, sex == 'M')$count,
+            name = "Male",
+            type = 'scatter') %>%
+  add_trace(x = name_diversity_time$year,
+            y = filter(name_diversity_time, sex == 'F')$count + filter(name_diversity_time, sex == 'M')$count,
+            name = "Total",
+            type = 'scatter') %>%
+  layout(xaxis = list(title = "Year"), yaxis = list(title = "Number of Names"), title = "Name Diversity Through the Years")
+```
+From this plot, we see that diversity of both names grew through time. People keeps on getting more and more creative as more babies were born. The only period of time where the amount of names did not see a continuous rising trend was in the 1920s and 1930s, possibly when the Great Depression occurred.  
+\
+\
+It seems like female names have always been more diversed than male names. However, the gap between both was fairly small before 1940. After that, the gap became wider and wider each year.
+
+### Diversity by States
+The diversity of names might be dependent on the states, considering states have very different culture and population to each other. An interesting visualization would be to look at the name density of the states on the US map. 
+\
+\
+One important thing to note is that larger states would tend to have more names. Therefore, when considering name diversity between states, I looked at the ratio between the number of names and the state's population. To obtain the population of each state, I summed up the total number of records of occurences in each state.  
+```{r cache=TRUE}
+# group by state and name, neglect year
+name_diversity_states = babynames%>%
+  group_by(state, name) %>%
+  summarise(count = sum(count)) %>%
+  summarise(name_count = n())
+```
+```{r}
+# zoom to usa
+map_config = list(
+  scope = 'usa',
+  projection = list(type = 'albers usa')
+)
+# plot map
+plot_ly(name_diversity_states, z = name_count, type = 'choropleth', locations = state,locationmode = 'USA-states', marker = list(line = list(color = toRGB("white"))), color = name_count, colors = 'Blues') %>%
+  layout(title = "Name Diversity by States", geo = map_config)
+```
+
+Unsurprisingly, larger states tend to have the most names. California, Texas, and New York were the darkest in color on the map, thus the states with the most names. They are also the three largest states in terms of population. To alleviate the effect of population, I would look at the ratio between population and number of names. 
+
+```{r cache=TRUE}
+# state population
+state_pop = babynames %>%
+  group_by(state) %>%
+  summarise(count = sum(count))
+# calculate ratio
+name_diversity_states$population = state_pop$count
+name_diversity_states$ratio = name_diversity_states$population / name_diversity_states$name_count
+kable(arrange(name_diversity_states, ratio), align = 'l')
+```
+
+```{r}
+# plot map
+plot_ly(name_diversity_states, z = ratio, type = 'choropleth', locations = state,locationmode = 'USA-states', marker = list(line = list(color = toRGB("white"))), color = ratio, colors = 'Blues') %>%
+  layout(title = "Name Diversity and Population Ratio by States", geo = map_config)
+```
+
+Less populated states like Alaska, Wyoming, and Nevada have the lowest ratios. In Alaska, only 264 people share each name on average, compared to Pennsylavnia's 1908. Pennsylvania, New York, and Ohio had the highest ratios, or in other words, it's much more likely to run into person of the same name in these states.
+
